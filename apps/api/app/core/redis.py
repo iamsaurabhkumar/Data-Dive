@@ -50,10 +50,9 @@ async def init_redis_pool(redis_url: str) -> None:
     try:
         _pool = await create_pool(redis_settings)
         # Verify connectivity
-        async with _pool.get() as redis_conn:
-            await redis_conn.ping()
+        await _pool.ping()
         logger.info("ARQ Redis connection pool initialized")
-    except (ConnectionError, TimeoutError) as exc:
+    except (ConnectionError, TimeoutError, Exception) as exc:
         logger.error("Redis startup connectivity check failed: %s", exc)
         raise
 
@@ -73,9 +72,8 @@ async def check_redis_health() -> bool:
     if _pool is None:
         return False
     try:
-        async with _pool.get() as redis_conn:
-            return await redis_conn.ping()
-    except (ConnectionError, TimeoutError, RedisError):
+        return await _pool.ping()
+    except (ConnectionError, TimeoutError, RedisError, Exception):
         return False
 
 async def enqueue_task(
