@@ -1,6 +1,7 @@
 networks:
   datadive_net:
-    driver: bridge
+    name: data-dive_datadive_net
+    external: true
 
 services:
   # ──────────────────────────────────────────────
