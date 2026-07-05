@@ -10,10 +10,11 @@ export async function GET(request: Request) {
     const supabase = await createClient();
     const { error } = await supabase.auth.exchangeCodeForSession(code);
     if (!error) {
-      return NextResponse.redirect(`${origin}${next}`);
+      // Create absolute URL but allow reverse proxy/tunnel to handle protocol
+      return NextResponse.redirect(new URL(next, request.url));
     }
   }
 
   // Return to home page on error
-  return NextResponse.redirect(`${origin}/?error=auth_callback_error`);
+  return NextResponse.redirect(new URL("/?error=auth_callback_error", request.url));
 }
