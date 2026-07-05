@@ -67,7 +67,14 @@ To switch to live data, set `MOCK_MODE=false` in `apps/api/.env` and configure y
 - [x] Skeleton loading states
 - [x] Responsive dark-mode UI
 
+## 📈 Phase 2 Features (Insights Engine)
+
+- [x] Real API Integration (YouTube Data API v3 & Meta Graph API)
+- [x] Database Sync & Aggregation (Supabase PostgreSQL)
+- [x] Insights Engine UI (Recharts data visualization)
+- [x] "What Works" Algorithmic Recommendations
+- [x] Multi-platform performance comparison charts
+
 ## 🔮 Roadmap
 
-- **Phase 2**: Insights Engine — bar charts, performance comparison, "What Works" algorithm
 - **Phase 3**: Planning Bridge — Kanban board, "Generate Next Project" from insights

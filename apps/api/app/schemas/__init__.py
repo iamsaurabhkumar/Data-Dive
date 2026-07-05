@@ -57,6 +57,10 @@ class CreatorProfileSchema(BaseModel):
     instagram_user_id: Optional[str] = None
 
 
+class SyncRequest(BaseModel):
+    provider_token: Optional[str] = None
+    provider: Optional[str] = None
+
 class SyncResponse(BaseModel):
     success: bool
     posts_synced: int

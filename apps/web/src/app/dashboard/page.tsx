@@ -19,6 +19,7 @@ import {
   Video,
   Camera,
   Loader2,
+  Lightbulb,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -130,7 +131,9 @@ export default function DashboardPage() {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token || "demo-token";
-      await api.syncContent(token);
+      const providerToken = session?.provider_token ?? undefined;
+      const provider = session?.user?.app_metadata?.provider;
+      await api.syncContent(token, providerToken, provider);
       await fetchData(token);
     } catch (err) {
       console.error("Sync failed:", err);
@@ -218,6 +221,27 @@ export default function DashboardPage() {
           >
             <TrendingUp size={18} />
             Insights
+          </div>
+
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "10px",
+              padding: "10px 12px",
+              borderRadius: "var(--radius-sm)",
+              color: "var(--text-secondary)",
+              cursor: "pointer",
+              fontSize: "14px",
+              fontWeight: 500,
+              transition: "all 0.2s",
+            }}
+            onClick={() => router.push("/explore")}
+            onMouseOver={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; e.currentTarget.style.color = "var(--text-primary)"; }}
+            onMouseOut={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--text-secondary)"; }}
+          >
+            <Lightbulb size={18} />
+            Explore Ideas
           </div>
 
           <div style={{ margin: "24px 12px 8px", fontSize: "11px", fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.5px" }}>

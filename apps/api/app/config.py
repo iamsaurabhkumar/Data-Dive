@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     # CORS
     frontend_url: str = "http://localhost:3000"
 
+    # Redis broker
+    redis_url: str = "redis://localhost:6379/0"
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

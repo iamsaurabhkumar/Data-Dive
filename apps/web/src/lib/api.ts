@@ -128,10 +128,14 @@ export const api = {
   getSummary: (token: string) =>
     apiFetch<SummaryResponse>("/api/content/summary", { token }),
 
-  syncContent: (token: string) =>
+  syncContent: (token: string, providerToken?: string, provider?: string) =>
     apiFetch<{ success: boolean; posts_synced: number; message: string }>(
       "/api/content/sync",
-      { token, method: "POST" }
+      { 
+        token, 
+        method: "POST",
+        body: JSON.stringify({ provider_token: providerToken, provider: provider })
+      }
     ),
 
   // Metrics

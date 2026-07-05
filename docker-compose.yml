@@ -1,0 +1,111 @@
+networks:
+  datadive_net:
+    driver: bridge
+
+services:
+  # ──────────────────────────────────────────────
+  # Service 1: Redis In-Memory Broker
+  # Volatile message transport. No persistence.
+  # ──────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: datadive-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - datadive_net
+    restart: unless-stopped
+    command: >
+      redis-server
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --save ""
+      --appendonly no
+      --tcp-backlog 128
+      --timeout 0
+      --tcp-keepalive 300
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+  # ──────────────────────────────────────────────
+  # Service 2: FastAPI Routing Engine
+  # Stateless gateway. Sub-50ms task dispatch.
+  # ──────────────────────────────────────────────
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    container_name: datadive-api
+    ports:
+      - "8000:8000"
+    networks:
+      - datadive_net
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      - DEBUG=false
+      - MOCK_MODE=false
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
+      - SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY}
+      - SUPABASE_JWT_SECRET=${SUPABASE_JWT_SECRET}
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=redis://redis:6379/0
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - META_APP_ID=${META_APP_ID}
+      - META_APP_SECRET=${META_APP_SECRET}
+
+  # ──────────────────────────────────────────────
+  # Service 3: Next.js Client Gateway
+  # Presentation layer with Supabase Realtime WS.
+  # ──────────────────────────────────────────────
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile
+    container_name: datadive-web
+    ports:
+      - "3000:3000"
+    networks:
+      - datadive_net
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      - NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
+      - NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+      - INTERNAL_API_URL=http://api:8000
+
+  # ──────────────────────────────────────────────
+  # Service 4: ARQ Async Processing Worker
+  # Decoupled background engine. Owns all heavy I/O.
+  # ──────────────────────────────────────────────
+  worker:
+    build:
+      context: ./apps/worker
+      dockerfile: Dockerfile
+    container_name: datadive-worker
+    networks:
+      - datadive_net
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - DATABASE_URL=${DATABASE_URL}
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - APIFY_API_KEY=${APIFY_API_KEY:-}
+      - NEWSAPI_KEY=${NEWSAPI_KEY:-}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}

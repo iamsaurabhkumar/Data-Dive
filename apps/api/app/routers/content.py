@@ -14,6 +14,7 @@ from app.schemas import (
     ContentPostSchema,
     MetricsSchema,
     SummaryResponse,
+    SyncRequest,
     SyncResponse,
 )
 from app.services.mock_data import get_mock_feed, get_mock_summary
@@ -143,34 +144,72 @@ async def get_summary(
     posts = result.scalars().all()
     
     if not posts:
-        return SummaryResponse(total_views=0, total_posts=0, avg_engagement_rate=0.0, top_platform="None")
+        return SummaryResponse(
+            total_views=0, 
+            total_likes=0,
+            total_comments=0,
+            total_posts=0, 
+            avg_views_per_post=0,
+            avg_engagement_rate=0.0, 
+            top_platform="None",
+            top_content_type="None",
+            platform_breakdown={
+                "youtube": {"posts": 0, "views": 0},
+                "instagram": {"posts": 0, "views": 0}
+            }
+        )
 
     total_views = 0
     total_engagements = 0
+    total_likes = 0
+    total_comments = 0
     platform_counts = {"YouTube": 0, "Instagram": 0}
+    type_counts = {}
     
     for p in posts:
+        type_counts[p.content_type] = type_counts.get(p.content_type, 0) + 1
         m_stmt = select(MetricSnapshot).where(MetricSnapshot.post_id == p.id).order_by(desc(MetricSnapshot.captured_at)).limit(1)
         snapshot = (await db.execute(m_stmt)).scalar_one_or_none()
         
         if snapshot:
             total_views += snapshot.views
+            total_likes += snapshot.likes
+            total_comments += snapshot.comments
             total_engagements += (snapshot.likes + snapshot.comments + snapshot.shares + snapshot.saves)
             platform_counts[p.platform] += snapshot.views
 
     top_platform = "YouTube" if platform_counts["YouTube"] >= platform_counts["Instagram"] else "Instagram"
     avg_engagement_rate = (total_engagements / total_views * 100) if total_views > 0 else 0.0
+    avg_views_per_post = int(total_views / len(posts)) if posts else 0
+    top_content_type = max(type_counts.items(), key=lambda x: x[1])[0] if type_counts else "None"
+    
+    breakdown = {
+        "youtube": {
+            "posts": len([p for p in posts if p.platform.lower() == "youtube"]),
+            "views": platform_counts["YouTube"]
+        },
+        "instagram": {
+            "posts": len([p for p in posts if p.platform.lower() == "instagram"]),
+            "views": platform_counts["Instagram"]
+        }
+    }
 
     return SummaryResponse(
         total_views=total_views,
+        total_likes=total_likes,
+        total_comments=total_comments,
         total_posts=len(posts),
+        avg_views_per_post=avg_views_per_post,
         avg_engagement_rate=round(avg_engagement_rate, 2),
-        top_platform=top_platform
+        top_platform=top_platform,
+        top_content_type=top_content_type,
+        platform_breakdown=breakdown
     )
 
 
 @router.post("/sync", response_model=SyncResponse)
 async def sync_content(
+    request: SyncRequest,
     user: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -179,21 +218,9 @@ async def sync_content(
     if settings.mock_mode:
         return SyncResponse(success=True, posts_synced=60, message="Mock sync completed.")
 
-    # We extract the provider tokens from the Supabase user identity session
-    # For now, we simulate grabbing the tokens from the JWT if passed, 
-    # but normally we'd query the DB or Supabase admin API for the user's identities.
-    
-    # NOTE: Since the frontend passes the provider tokens to a connect endpoint or we fetch via Supabase API,
-    # let's assume we have them here. (We need to actually implement token storage or retrieval).
-    # To keep it simple for MVP, we assume the tokens were saved in creator_profiles or passed in headers.
-    
-    # In a real production setup, we query Supabase Auth for identities.
-    # For MVP we will just return a placeholder message if tokens aren't available.
-    
     try:
-        # TODO: Fetch real tokens from user's identities via Supabase Admin API
-        youtube_token = None 
-        instagram_token = None
+        youtube_token = request.provider_token if request.provider == "google" else None 
+        instagram_token = request.provider_token if request.provider == "facebook" else None
         
         aggregator = AggregatorService(db, user["sub"])
         stats = await aggregator.sync_platform_data(youtube_token, instagram_token)

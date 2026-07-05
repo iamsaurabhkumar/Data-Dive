@@ -4,6 +4,7 @@ from typing import Dict, Any, List
 
 from app.models.content import ContentPost
 from app.models.metric import MetricSnapshot
+from app.models.creator import CreatorProfile
 from app.services.youtube import YouTubeService
 from app.services.instagram import InstagramService
 
@@ -16,6 +17,14 @@ class AggregatorService:
 
     async def sync_platform_data(self, youtube_token: str = None, instagram_token: str = None) -> Dict[str, int]:
         """Fetches data from platforms and upserts into database."""
+        # Ensure CreatorProfile exists to satisfy foreign key constraints
+        stmt = select(CreatorProfile).where(CreatorProfile.id == self.creator_id)
+        result = await self.db.execute(stmt)
+        if not result.scalar_one_or_none():
+            profile = CreatorProfile(id=self.creator_id, user_id=self.creator_id)
+            self.db.add(profile)
+            await self.db.commit()
+
         stats = {"youtube_synced": 0, "instagram_synced": 0}
 
         # 1. Sync YouTube
@@ -55,6 +64,14 @@ class AggregatorService:
 
             # Insert new post if not exists
             if not post:
+                pub_at = p_data.get("published_at")
+                if isinstance(pub_at, str):
+                    try:
+                        from datetime import datetime
+                        pub_at = datetime.fromisoformat(pub_at.replace("Z", "+00:00"))
+                    except ValueError:
+                        pub_at = None
+
                 post = ContentPost(
                     creator_id=self.creator_id,
                     platform=p_data["platform"],
@@ -62,7 +79,7 @@ class AggregatorService:
                     title=p_data["title"],
                     content_type=p_data["content_type"],
                     thumbnail_url=p_data["thumbnail_url"],
-                    published_at=p_data["published_at"]
+                    published_at=pub_at
                 )
                 self.db.add(post)
                 await self.db.flush() # flush to get post.id

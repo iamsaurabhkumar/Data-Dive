@@ -113,6 +113,16 @@ export default function InsightsPage() {
             <span style={{ fontSize: "14px", fontWeight: 500 }}>Insights</span>
           </button>
 
+          <button 
+            onClick={() => router.push("/explore")}
+            style={{ display: "flex", alignItems: "center", gap: "12px", padding: "10px 16px", borderRadius: "var(--radius-md)", width: "100%", textAlign: "left", background: "transparent", color: "var(--text-secondary)", transition: "all 0.2s", border: "none", cursor: "pointer" }}
+            onMouseOver={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; e.currentTarget.style.color = "var(--text-primary)"; }}
+            onMouseOut={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--text-secondary)"; }}
+          >
+            <Lightbulb size={18} />
+            <span style={{ fontSize: "14px", fontWeight: 500 }}>Explore Ideas</span>
+          </button>
+
         </nav>
 
         <div style={{ padding: "24px", borderTop: "1px solid var(--border-color)" }}>

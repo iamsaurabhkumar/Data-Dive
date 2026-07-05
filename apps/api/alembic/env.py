@@ -21,7 +21,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from app.db.session import Base
-from app.models import creator, content, metric
+from app.models import creator, content, metric, trend, suggestion
+from pgvector.sqlalchemy import Vector
 from app.config import get_settings
 
 settings = get_settings()
@@ -60,6 +61,8 @@ def run_migrations_offline() -> None:
 
 
 def do_run_migrations(connection: Connection) -> None:
+    # Register pgvector's Vector type so Alembic autogenerate can detect it
+    connection.dialect.ischema_names["vector"] = Vector
     context.configure(connection=connection, target_metadata=target_metadata)
 
     with context.begin_transaction():
