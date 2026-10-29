@@ -34,3 +34,5 @@ npm-debug.log*
 coverage/
 .coverage
 htmlcov/
+
+.agents/AGENTS.md
