@@ -1,6 +1,33 @@
-from typing import List, Dict, Any
-from googleapiclient.discovery import build
+import re
+from typing import Any, Dict, List
+
 from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
+
+_DURATION_RE = re.compile(r"^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$")
+SHORT_MAX_SECONDS = 180  # YouTube Shorts may be up to 3 minutes (since Oct 2024)
+
+
+def parse_iso8601_duration(duration: str) -> int | None:
+    """'PT1M23S' -> 83 seconds. Returns None for unparseable input."""
+    if not duration:
+        return None
+    m = _DURATION_RE.match(duration)
+    if not m:
+        return None
+    days, hours, minutes, seconds = (int(x) if x else 0 for x in m.groups())
+    return days * 86400 + hours * 3600 + minutes * 60 + seconds
+
+
+def classify_youtube_video(duration: str, title: str = "", description: str = "") -> str:
+    seconds = parse_iso8601_duration(duration)
+    if seconds is None:
+        return "Long-form"
+    if seconds <= 60:
+        return "Short"
+    if seconds <= SHORT_MAX_SECONDS and "#shorts" in f"{title} {description}".lower():
+        return "Short"
+    return "Long-form"
 
 class YouTubeService:
     """Client for interacting with the YouTube Data API v3."""
@@ -63,18 +90,11 @@ class YouTubeService:
             stats = video.get("statistics", {})
             content_details = video.get("contentDetails", {})
             
-            # Determine if Short or Long-form based on duration
-            # Duration format is ISO 8601 (e.g., PT1M23S)
-            # A rough heuristic: if duration contains 'M' and number before M is > 1, or 'H', it's long-form.
-            # For simplicity, we just check if "S" is the only thing and it's less than 60s, but 
-            # YouTube API doesn't strictly categorize shorts. We'll label anything under 60s as "Short".
-            duration = content_details.get("duration", "")
-            content_type = "Long-form"
-            if "M" not in duration and "H" not in duration and "S" in duration:
-                content_type = "Short"
-            elif "PT1M" in duration and duration.endswith("S") and int(duration.split("M")[0].replace("PT", "")) == 0:
-                 # It's less than 60 seconds (but strictly not standard PT format)
-                 content_type = "Short"
+            # The Data API does not flag Shorts explicitly: <= 60s is a Short, and
+            # 60–180s counts when the creator tagged it #shorts.
+            content_type = classify_youtube_video(
+                content_details.get("duration", ""), snippet.get("title", ""), snippet.get("description", "")
+            )
 
             normalized.append({
                 "platform": "YouTube",

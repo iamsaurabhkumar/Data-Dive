@@ -56,3 +56,7 @@ uvicorn==0.30.6
 uvloop==0.22.1
 watchfiles==1.2.0
 websockets==16.0
+
+# Optional: OTLP telemetry sink (TELEMETRY_SINKS=otlp)
+opentelemetry-sdk>=1.25.0
+opentelemetry-exporter-otlp-proto-http>=1.25.0

@@ -6,8 +6,9 @@ export async function GET(request: Request) {
   const code = searchParams.get("code");
   const next = searchParams.get("next") ?? "/dashboard";
 
-  // Force the origin to your public domain, bypassing the internal Docker IP
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "https://divesocialdata.com";
+  // Public origin for the redirect. NEXT_PUBLIC_SITE_URL bypasses the internal Docker
+  // address in production; locally we fall back to the request's own origin.
+  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || new URL(request.url).origin;
 
   if (code) {
     const supabase = await createClient();

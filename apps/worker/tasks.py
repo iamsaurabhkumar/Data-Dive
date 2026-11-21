@@ -72,19 +72,49 @@ async def fetch_youtube_trends(http_client: httpx.AsyncClient, category_id: str 
     return trends
 
 
-def get_rag_system_prompt() -> str:
+async def load_creator_context(creator_id: str, limit: int = 40) -> dict:
     """
-    Constructs the system instruction for the LLM Reasoner.
-    Pivots raw trends into narrative-driven concepts for 'Keyboard on Clouds'.
+    Pull the creator's recent titles (best performers first) so the LLM persona is
+    derived from *their* content rather than a hard-coded channel.
     """
-    return (
-        "You are an elite creative director for a YouTube channel called 'Keyboard on Clouds'. "
-        "The channel focuses on personal journeys, productivity, tech, and translating complex life lessons "
-        "into modern, relatable, highly-aesthetic stories.\n\n"
-        "Your task is to review the following trending YouTube topics and pivot them into a unique, "
-        "narrative-driven video concept for 'Keyboard on Clouds'. Do NOT generate generic listicles. "
-        "Instead, focus on how the creator can weave their personal experience into the trend."
+    sql = text("""
+        SELECT p.platform, p.content_type, p.title, COALESCE(m.views, 0) AS views
+        FROM content_posts p
+        LEFT JOIN LATERAL (
+            SELECT views FROM metric_snapshots s WHERE s.post_id = p.id
+            ORDER BY captured_at DESC LIMIT 1
+        ) m ON TRUE
+        WHERE p.creator_id = :creator_id
+        ORDER BY COALESCE(m.views, 0) DESC
+        LIMIT :limit
+    """)
+    async with get_session() as session:
+        rows = (await session.execute(sql, {"creator_id": creator_id, "limit": limit})).all()
+    return {
+        "titles": [r.title for r in rows],
+        "platforms": sorted({r.platform for r in rows}),
+        "top": [f"{r.title} ({r.platform} {r.content_type}, {r.views:,} views)" for r in rows[:8]],
+    }
+
+
+def get_rag_system_prompt(context: dict | None = None) -> str:
+    """
+    System instruction for the LLM reasoner, grounded in the creator's own catalogue.
+    Falls back to a generic creator persona when the creator has no synced content yet.
+    """
+    base = (
+        "You are an elite creative director for an independent content creator. "
+        "Review the trending topic provided and pivot it into ONE specific, narrative-driven video concept "
+        "this creator could realistically make next week. Do NOT generate generic listicles; weave the "
+        "creator's existing themes and personal experience into the trend."
     )
+    if context and context.get("top"):
+        base += (
+            "\n\nThe creator publishes on: " + ", ".join(context["platforms"]) + ".\n"
+            "Their best-performing recent content (use this to infer voice, niche and audience):\n- "
+            + "\n- ".join(context["top"])
+        )
+    return base
 
 
 async def fetch_and_analyze_trends(ctx: dict[str, Any], creator_id: str, platform: str = "youtube") -> dict:
@@ -101,8 +131,15 @@ async def fetch_and_analyze_trends(ctx: dict[str, Any], creator_id: str, platfor
     
     http_client: httpx.AsyncClient = ctx['http']
     openai_client: openai.AsyncClient = ctx['openai']
-    
+
+    if not _settings.openai_api_key:
+        logger.warning("OPENAI_API_KEY not set — skipping trend analysis for creator=%s", creator_id)
+        return {"status": "skipped", "reason": "no_openai_key"}
+
     try:
+        # 0. Creator context for the persona prompt
+        creator_context = await load_creator_context(creator_id)
+
         # 1. Fetch Truncated Trends
         trends = await fetch_youtube_trends(http_client)
         if not trends:
@@ -124,7 +161,7 @@ async def fetch_and_analyze_trends(ctx: dict[str, Any], creator_id: str, platfor
         completion = await openai_client.beta.chat.completions.parse(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": get_rag_system_prompt()},
+                {"role": "system", "content": get_rag_system_prompt(creator_context)},
                 {"role": "user", "content": f"Here is the top trending video data: {trend_text}. Generate a video suggestion based on this."},
             ],
             response_format=LLMSuggestion,
@@ -183,9 +220,11 @@ async def fetch_and_analyze_trends(ctx: dict[str, Any], creator_id: str, platfor
             # Insert ContentSuggestion
             insert_suggestion_sql = text("""
                 INSERT INTO content_suggestions (
-                    id, creator_id, trend_id, title, description, reasoning, confidence_score, status
+                    id, creator_id, trend_id, title, description, reasoning, confidence_score, status,
+                    source, platform, content_type, topics
                 ) VALUES (
-                    :id, :creator_id, :trend_id, :title, :description, :reasoning, :confidence_score, 'pending'
+                    :id, :creator_id, :trend_id, :title, :description, :reasoning, :confidence_score, 'pending',
+                    'trend', 'YouTube', 'Long-form', :topics
                 )
             """)
             await session.execute(insert_suggestion_sql, {
@@ -195,7 +234,8 @@ async def fetch_and_analyze_trends(ctx: dict[str, Any], creator_id: str, platfor
                 "title": suggestion_output.title,
                 "description": suggestion_output.description,
                 "reasoning": suggestion_output.reasoning,
-                "confidence_score": suggestion_output.confidence_score,
+                "confidence_score": max(0.0, min(1.0, suggestion_output.confidence_score)),
+                "topics": json.dumps(top_trend['tags'][:3]),
             })
             
             # Transaction automatically commits on exit of context manager
@@ -215,3 +255,98 @@ async def fetch_and_analyze_trends(ctx: dict[str, Any], creator_id: str, platfor
     except Exception as exc:
         logger.exception("Unexpected error in fetch_and_analyze_trends")
         raise
+
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Phase 3 additions
+# ──────────────────────────────────────────────────────────────────────────
+class LLMEnrichment(BaseModel):
+    """Hook + outline for an existing idea (structured output)."""
+    title: str = Field(description="A sharper, specific title (max 70 chars).")
+    hook: str = Field(description="The first spoken/on-screen line. One or two sentences, pattern-interrupt.")
+    outline: list[str] = Field(description="4-7 production beats, in order, each one line.")
+
+
+ENRICH_MAX_TRIES = 3
+
+
+async def _set_enrichment_status(suggestion_id: str, status: str) -> None:
+    async with get_session() as session:
+        await session.execute(text(
+            "UPDATE content_suggestions SET enrichment_status = :s, updated_at = now() WHERE id = :id"
+        ), {"id": suggestion_id, "s": status})
+
+
+async def enrich_idea(ctx: dict[str, Any], suggestion_id: str) -> dict:
+    """
+    Optional LLM pass over an idea produced by the analytics engine or "Generate Next Project":
+    rewrites the title and fills hook/outline in the creator's voice, grounded in the trend
+    that inspired it. The forecast/prediction is never touched so it stays reviewable.
+
+    enrichment_status: queued → done | skipped (no key) | failed (after ENRICH_MAX_TRIES)
+    """
+    openai_client: openai.AsyncClient = ctx['openai']
+    if not _settings.openai_api_key:
+        await _set_enrichment_status(suggestion_id, "skipped")
+        return {"status": "skipped", "reason": "no_openai_key"}
+
+    async with get_session() as session:
+        row = (await session.execute(text("""
+            SELECT s.id, s.creator_id, s.title, s.hook, s.outline, s.platform, s.content_type, s.topics, s.reasoning,
+                   t.title AS trend_title, t.source AS trend_source, t.raw_metadata AS trend_meta
+            FROM content_suggestions s
+            LEFT JOIN platform_trends t ON t.id = s.trend_id
+            WHERE s.id = :id
+        """), {"id": suggestion_id})).first()
+    if row is None:
+        return {"status": "not_found"}
+
+    context = await load_creator_context(str(row.creator_id))
+    trend_line = ""
+    if row.trend_title:
+        tags = (row.trend_meta or {}).get("tags", []) if isinstance(row.trend_meta, dict) else []
+        trend_line = f"Trend it builds on: {row.trend_title} (on {row.trend_source}; tags: {', '.join(tags[:5])})\n"
+    user_msg = (
+        f"Idea: {row.title}\nPlatform/format: {row.platform} {row.content_type}\n{trend_line}"
+        f"Topics: {', '.join(row.topics or [])}\nWhy it was suggested: {row.reasoning or ''}\n"
+        f"Current hook: {row.hook or '(none)'}\nCurrent outline: {row.outline or '(none)'}\n\n"
+        "Rewrite the title, write the hook and a production outline for this exact format. "
+        "Keep the same angle and the same trend; do not invent statistics."
+    )
+    attempt = ctx.get('job_try', 1)
+    try:
+        completion = await openai_client.beta.chat.completions.parse(
+            model="gpt-4o-mini",
+            messages=[{"role": "system", "content": get_rag_system_prompt(context)},
+                      {"role": "user", "content": user_msg}],
+            response_format=LLMEnrichment,
+        )
+    except openai.APIError as exc:
+        logger.warning("OpenAI error enriching %s (attempt %d): %s", suggestion_id, attempt, exc)
+        if attempt >= ENRICH_MAX_TRIES:
+            await _set_enrichment_status(suggestion_id, "failed")
+            return {"status": "failed", "suggestion_id": suggestion_id}
+        raise Retry(defer=10 * (3 ** (attempt - 1)))
+
+    out = completion.choices[0].message.parsed
+    async with get_session() as session:
+        await session.execute(text("""
+            UPDATE content_suggestions
+            SET title = :title, hook = :hook, outline = :outline, enrichment_status = 'done', updated_at = now()
+            WHERE id = :id
+        """), {"id": suggestion_id, "title": out.title[:200], "hook": out.hook, "outline": json.dumps(out.outline)})
+    logger.info("Enriched suggestion %s", suggestion_id)
+    return {"status": "success", "suggestion_id": suggestion_id}
+
+
+async def fetch_trends_for_all_creators(ctx: dict[str, Any]) -> dict:
+    """12-hour cron (per V2 spec): enqueue a trend analysis job for every creator profile."""
+    from arq import ArqRedis  # local import: only needed inside the worker process
+    redis: ArqRedis = ctx['redis']
+    async with get_session() as session:
+        ids = [str(r[0]) for r in (await session.execute(text("SELECT id FROM creator_profiles"))).all()]
+    for cid in ids:
+        await redis.enqueue_job("fetch_and_analyze_trends", cid, "youtube", _job_id=f"trends:{cid}:{datetime.now(timezone.utc):%Y%m%d%H}")
+    logger.info("Scheduled trend analysis for %d creators", len(ids))
+    return {"scheduled": len(ids)}

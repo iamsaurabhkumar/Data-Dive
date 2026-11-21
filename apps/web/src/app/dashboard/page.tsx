@@ -6,11 +6,8 @@ import {
   BarChart3,
   Eye,
   Heart,
-  MessageCircle,
-  TrendingUp,
   RefreshCw,
-  LogOut,
-  LayoutDashboard,
+  TrendingUp,
   Zap,
   Clock,
   Crown,
@@ -19,8 +16,10 @@ import {
   Video,
   Camera,
   Loader2,
-  Lightbulb,
 } from "lucide-react";
+import AppShell from "@/components/AppShell";
+import { useTelemetry } from "@/hooks/useTelemetry";
+import { track as trackEvent } from "@/lib/telemetry";
 import { createClient } from "@/lib/supabase/client";
 import {
   api,
@@ -82,6 +81,8 @@ export default function DashboardPage() {
   // User
   const [userEmail, setUserEmail] = useState<string>("Demo User");
   const [isDemo, setIsDemo] = useState(true);
+  const [token, setToken] = useState("");
+  useTelemetry("dashboard", token, !!token);
 
   const fetchData = useCallback(async (token: string) => {
     try {
@@ -115,10 +116,12 @@ export default function DashboardPage() {
       if (session?.user) {
         setUserEmail(session.user.email || "Creator");
         setIsDemo(false);
+        setToken(session.access_token);
         fetchData(session.access_token);
       } else {
         // Demo mode with mock token
         setIsDemo(true);
+        setToken("demo-token");
         fetchData("demo-token");
       }
     };
@@ -133,10 +136,14 @@ export default function DashboardPage() {
       const token = session?.access_token || "demo-token";
       const providerToken = session?.provider_token ?? undefined;
       const provider = session?.user?.app_metadata?.provider;
-      await api.syncContent(token, providerToken, provider);
+      const res = await api.syncContent(token, providerToken, provider);
+      trackEvent("sync", "sync", { success: res.success, posts: res.posts_synced, provider: provider ?? "none", had_provider_token: !!providerToken });
+      if (!res.success) setError(res.message);
       await fetchData(token);
+      if (!res.success) setError(res.message);
     } catch (err) {
-      console.error("Sync failed:", err);
+      trackEvent("sync", "sync", { success: false, posts: 0 });
+      setError(err instanceof Error ? err.message : "Sync failed");
     } finally {
       setSyncing(false);
     }
@@ -148,6 +155,7 @@ export default function DashboardPage() {
   };
 
   const toggleSort = (field: SortField) => {
+    trackEvent("dashboard", "sort", { field, order: sortBy === field && sortOrder === "desc" ? "asc" : "desc" });
     if (sortBy === field) {
       setSortOrder(sortOrder === "desc" ? "asc" : "desc");
     } else {
@@ -157,164 +165,27 @@ export default function DashboardPage() {
   };
 
   return (
-    <div className="dashboard-layout">
-      {/* Sidebar */}
-      <aside className="sidebar">
-        <div style={{ padding: "24px", borderBottom: "1px solid var(--border-subtle)" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-            <div
-              style={{
-                width: "36px",
-                height: "36px",
-                borderRadius: "var(--radius-sm)",
-                background: "var(--gradient-brand)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <BarChart3 size={20} color="white" />
-            </div>
-            <span style={{ fontSize: "18px", fontWeight: 700, letterSpacing: "-0.3px" }}>
-              Data<span className="text-gradient">Dive</span>
+    <AppShell
+      token={token}
+      title="Analytics Dashboard"
+      subtitle={isDemo ? "Viewing mock data — connect platforms for real analytics" : "Real-time cross-platform metrics"}
+      email={userEmail}
+      isDemo={isDemo}
+      onSignOut={handleLogout}
+      actions={
+        <>
+          {isDemo && (
+            <span className="badge" style={{ background: "rgba(245, 158, 11, 0.1)", color: "var(--accent-amber)", border: "1px solid rgba(245, 158, 11, 0.2)", padding: "4px 12px", fontSize: "11px" }}>
+              <Zap size={12} /> DEMO
             </span>
-          </div>
-        </div>
-
-        {/* Navigation */}
-        <nav style={{ padding: "16px 12px", flex: 1 }}>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "10px",
-              padding: "10px 12px",
-              borderRadius: "var(--radius-sm)",
-              background: "rgba(59, 130, 246, 0.08)",
-              color: "var(--accent-blue)",
-              cursor: "pointer",
-              fontSize: "14px",
-              fontWeight: 500,
-            }}
-            onClick={() => router.push("/dashboard")}
-          >
-            <LayoutDashboard size={18} />
-            Dashboard
-          </div>
-
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "10px",
-              padding: "10px 12px",
-              borderRadius: "var(--radius-sm)",
-              color: "var(--text-secondary)",
-              cursor: "pointer",
-              fontSize: "14px",
-              fontWeight: 500,
-              transition: "all 0.2s",
-            }}
-            onClick={() => router.push("/insights")}
-            onMouseOver={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; e.currentTarget.style.color = "var(--text-primary)"; }}
-            onMouseOut={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--text-secondary)"; }}
-          >
-            <TrendingUp size={18} />
-            Insights
-          </div>
-
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "10px",
-              padding: "10px 12px",
-              borderRadius: "var(--radius-sm)",
-              color: "var(--text-secondary)",
-              cursor: "pointer",
-              fontSize: "14px",
-              fontWeight: 500,
-              transition: "all 0.2s",
-            }}
-            onClick={() => router.push("/explore")}
-            onMouseOver={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; e.currentTarget.style.color = "var(--text-primary)"; }}
-            onMouseOut={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--text-secondary)"; }}
-          >
-            <Lightbulb size={18} />
-            Explore Ideas
-          </div>
-
-          <div style={{ margin: "24px 12px 8px", fontSize: "11px", fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.5px" }}>
-            Connected Platforms
-          </div>
-
-          <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", borderRadius: "var(--radius-sm)" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "14px", color: "var(--text-secondary)" }}>
-                <Video size={16} style={{ color: "var(--youtube-red)" }} />
-                YouTube
-              </div>
-              <span className="badge badge-connected" style={{ fontSize: "10px", padding: "2px 8px" }}>Live</span>
-            </div>
-
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", borderRadius: "var(--radius-sm)" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "14px", color: "var(--text-secondary)" }}>
-                <Camera size={16} style={{ color: "var(--instagram-pink)" }} />
-                Instagram
-              </div>
-              <span className="badge badge-connected" style={{ fontSize: "10px", padding: "2px 8px" }}>Live</span>
-            </div>
-          </div>
-        </nav>
-
-        {/* User info */}
-        <div style={{ padding: "16px", borderTop: "1px solid var(--border-subtle)" }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <div>
-              <div style={{ fontSize: "13px", fontWeight: 500, color: "var(--text-primary)" }}>{userEmail}</div>
-              <div style={{ fontSize: "11px", color: "var(--text-muted)" }}>
-                {isDemo ? "Demo Mode" : "Creator"}
-              </div>
-            </div>
-            <button onClick={handleLogout} className="btn btn-ghost btn-sm" title="Sign out">
-              <LogOut size={16} />
-            </button>
-          </div>
-        </div>
-      </aside>
-
-      {/* Main content */}
-      <main className="main-content">
-        {/* Header */}
-        <header className="header">
-          <div>
-            <h1 style={{ fontSize: "20px", fontWeight: 700, letterSpacing: "-0.3px" }}>
-              Analytics Dashboard
-            </h1>
-            <p style={{ fontSize: "13px", color: "var(--text-muted)", marginTop: "2px" }}>
-              {isDemo ? "Viewing mock data — connect platforms for real analytics" : "Real-time cross-platform metrics"}
-            </p>
-          </div>
-
-          <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-            {isDemo && (
-              <span className="badge" style={{ background: "rgba(245, 158, 11, 0.1)", color: "var(--accent-amber)", border: "1px solid rgba(245, 158, 11, 0.2)", padding: "4px 12px", fontSize: "11px" }}>
-                <Zap size={12} />
-                DEMO
-              </span>
-            )}
-            <button onClick={handleSync} className="btn btn-primary btn-sm" disabled={syncing}>
-              {syncing ? (
-                <Loader2 size={14} className="animate-spin" style={{ animation: "spin 1s linear infinite" }} />
-              ) : (
-                <RefreshCw size={14} />
-              )}
-              {syncing ? "Syncing..." : "Refresh"}
-            </button>
-          </div>
-        </header>
-
-        <div className="page-content">
+          )}
+          <button onClick={handleSync} className="btn btn-primary btn-sm" disabled={syncing}>
+            {syncing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+            {syncing ? "Syncing..." : "Sync"}
+          </button>
+        </>
+      }
+    >
           {error && (
             <div
               className="card animate-fade-in-up"
@@ -432,7 +303,7 @@ export default function DashboardPage() {
                     <button
                       key={p}
                       className={`filter-btn ${platformFilter === p ? "active" : ""}`}
-                      onClick={() => setPlatformFilter(p)}
+                      onClick={() => { trackEvent("dashboard", "filter", { platform: p }); setPlatformFilter(p); }}
                     >
                       {p === "all" ? "All" : p}
                     </button>
@@ -449,7 +320,7 @@ export default function DashboardPage() {
                     <button
                       key={t}
                       className={`filter-btn ${contentTypeFilter === t ? "active" : ""}`}
-                      onClick={() => setContentTypeFilter(t)}
+                      onClick={() => { trackEvent("dashboard", "filter", { content_type: t }); setContentTypeFilter(t); }}
                     >
                       {t === "all" ? "All" : t}
                     </button>
@@ -617,8 +488,6 @@ export default function DashboardPage() {
               </div>
             )}
           </div>
-        </div>
-      </main>
-    </div>
+    </AppShell>
   );
 }

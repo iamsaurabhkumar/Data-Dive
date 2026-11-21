@@ -10,6 +10,13 @@ from app.config import get_settings
 from app.routers.content import router as content_router
 from app.routers.auth import router as auth_router
 from app.routers.metrics import router as metrics_router
+from app.routers.analytics import router as analytics_router
+from app.routers.ideas import router as ideas_router
+from app.routers.kanban import router as kanban_router
+from app.routers.telemetry import router as telemetry_router
+from app.routers.projects import router as projects_router
+from app.middleware.usage import UsageTrackingMiddleware
+from app.services.telemetry.service import get_hub
 from app.core.redis import (
     init_redis_pool,
     close_redis_pool,
@@ -44,17 +51,26 @@ async def lifespan(app: FastAPI):
         logger.warning("Redis init failed — task dispatch unavailable: %s", exc)
         print(f"   Redis: UNAVAILABLE ({exc})")
 
+    # Usage tracking hub (buffer + background flush to db/log/webhook/otlp)
+    hub = get_hub()
+    hub.start()
+    print(f"   Telemetry: {'ON' if settings.telemetry_enabled else 'OFF'} → {', '.join(settings.telemetry_sink_list)}")
+
     yield
 
     # Shutdown: release all connections
+    await hub.stop()
     await close_redis_pool()
+    if not settings.mock_mode:
+        from app.db.session import dispose_engine
+        await dispose_engine()
     print(f"👋 {settings.app_name} shutting down...")
 
 
 app = FastAPI(
     title="Data-Dive API",
     description="Content Creator Data-First Analytics Engine",
-    version="0.2.0",
+    version="0.3.0",
     lifespan=lifespan,
 )
 
@@ -72,10 +88,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Usage tracking (must be added before CORS so it wraps the actual handlers; never raises)
+app.add_middleware(UsageTrackingMiddleware)
+
 # Include routers
 app.include_router(content_router)
 app.include_router(auth_router)
 app.include_router(metrics_router)
+app.include_router(analytics_router)
+app.include_router(ideas_router)
+app.include_router(kanban_router)
+app.include_router(telemetry_router)
+app.include_router(projects_router)
 
 
 @app.get("/api/health")
@@ -85,7 +109,7 @@ async def health_check():
     return {
         "status": "healthy",
         "service": "Data-Dive API",
-        "version": "0.2.0",
+        "version": "0.3.0",
         "mock_mode": settings.mock_mode,
         "redis": "connected" if redis_healthy else "unavailable",
     }

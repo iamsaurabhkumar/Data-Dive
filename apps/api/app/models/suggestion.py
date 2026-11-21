@@ -10,13 +10,12 @@ FK constraints:
   - trend_id   → ON DELETE SET NULL (TTL cleanup of stale trends must NOT delete suggestion cards)
 """
 import uuid
-from datetime import datetime
 
 from sqlalchemy import (
     Column, String, Text, Float, DateTime, ForeignKey,
-    text,
+    func, text,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 
 from app.db.session import Base
@@ -69,9 +68,22 @@ class ContentSuggestion(Base):
     # Workflow status — drives Supabase Realtime subscriptions
     status = Column(String(30), nullable=False, default="pending", index=True)
 
-    # Temporal
+    # ---- Phase 3: analytics-driven idea fields (all nullable for backwards compatibility) ----
+    source = Column(String(30), nullable=False, server_default="trend")   # trend | analytics | manual
+    hook = Column(Text, nullable=True)
+    outline = Column(JSONB, nullable=True)               # list[str]
+    platform = Column(String(20), nullable=True)         # YouTube | Instagram
+    content_type = Column(String(20), nullable=True)     # Short | Long-form | Reel | Post
+    topics = Column(JSONB, nullable=True)                # list[str]
+    strategy = Column(String(30), nullable=True)
+    recommended_slot = Column(JSONB, nullable=True)      # {weekday, hour_bucket, lift, ...}
+    prediction = Column(JSONB, nullable=True)            # Prediction.to_dict()
+    kit = Column(JSONB, nullable=True)                   # production kit from "Generate Next Project"
+    enrichment_status = Column(String(20), nullable=True)  # None | queued | done | failed | skipped
+
+    # Temporal (server-side timestamps — never naive datetimes into timestamptz)
     created_at = Column(DateTime(timezone=True), server_default=text("now()"), nullable=False)
-    updated_at = Column(DateTime(timezone=True), server_default=text("now()"), onupdate=datetime.utcnow)
+    updated_at = Column(DateTime(timezone=True), server_default=text("now()"), onupdate=func.now())
 
     # Relationships
     creator = relationship("CreatorProfile", backref="content_suggestions")

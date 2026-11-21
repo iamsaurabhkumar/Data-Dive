@@ -1,6 +1,5 @@
 import uuid
-from datetime import datetime
-from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, text
+from sqlalchemy import Column, String, Boolean, DateTime, func, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from app.db.session import Base
@@ -19,8 +18,9 @@ class CreatorProfile(Base):
     youtube_channel_id = Column(String, nullable=True)
     instagram_connected = Column(Boolean, default=False)
     instagram_user_id = Column(String, nullable=True)
+    telemetry_opt_out = Column(Boolean, nullable=False, server_default="false", default=False)
     created_at = Column(DateTime(timezone=True), server_default=text("now()"))
-    updated_at = Column(DateTime(timezone=True), server_default=text("now()"), onupdate=datetime.utcnow)
+    updated_at = Column(DateTime(timezone=True), server_default=text("now()"), onupdate=func.now())
 
     # Relationships
     content_posts = relationship("ContentPost", back_populates="creator", cascade="all, delete-orphan")

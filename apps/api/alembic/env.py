@@ -21,7 +21,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from app.db.session import Base
-from app.models import creator, content, metric, trend, suggestion
+from app.models import creator, content, metric, trend, suggestion, planning, telemetry  # noqa: F401
 from pgvector.sqlalchemy import Vector
 from app.config import get_settings
 

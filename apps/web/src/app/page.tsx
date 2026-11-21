@@ -9,6 +9,7 @@ import {
   Play,
   ArrowRight,
 } from "lucide-react";
+import ThemeToggle from "@/components/ThemeToggle";
 
 export default function LandingPage() {
   const router = useRouter();
@@ -31,6 +32,7 @@ export default function LandingPage() {
 
   return (
     <div className="landing-container">
+      <div style={{ position: "absolute", top: 20, right: 24, zIndex: 2 }}><ThemeToggle /></div>
       {/* Background glows */}
       <div className="landing-glow landing-glow-blue animate-pulse-glow" />
       <div className="landing-glow landing-glow-violet animate-pulse-glow" style={{ animationDelay: "2s" }} />

@@ -1,12 +1,19 @@
+import asyncio
+import logging
+from datetime import datetime
+from typing import Any, Dict, List
+
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from typing import Dict, Any, List
 
 from app.models.content import ContentPost
 from app.models.metric import MetricSnapshot
 from app.models.creator import CreatorProfile
 from app.services.youtube import YouTubeService
 from app.services.instagram import InstagramService
+
+logger = logging.getLogger("datadive.aggregator")
+
 
 class AggregatorService:
     """Service to fetch data from all connected platforms and store it in the database."""
@@ -25,29 +32,27 @@ class AggregatorService:
             self.db.add(profile)
             await self.db.commit()
 
-        stats = {"youtube_synced": 0, "instagram_synced": 0}
+        stats: Dict[str, Any] = {"youtube_synced": 0, "instagram_synced": 0, "errors": []}
 
-        # 1. Sync YouTube
+        # 1. Sync YouTube — google-api-python-client is synchronous, so keep it off the event loop
         if youtube_token:
             try:
-                # YouTube client is currently synchronous (google-api-python-client)
-                # In a real app we'd run this in a thread pool, but for now we call it directly
-                yt_service = YouTubeService(youtube_token)
-                yt_posts = yt_service.fetch_recent_videos()
+                yt_posts = await asyncio.to_thread(YouTubeService(youtube_token).fetch_recent_videos)
                 await self._upsert_posts(yt_posts)
                 stats["youtube_synced"] = len(yt_posts)
-            except Exception as e:
-                print(f"YouTube sync error: {e}")
+            except Exception:
+                logger.exception("YouTube sync failed for creator %s", self.creator_id)
+                stats["errors"].append("YouTube sync failed")
 
         # 2. Sync Instagram
         if instagram_token:
             try:
-                ig_service = InstagramService(instagram_token)
-                ig_posts = await ig_service.fetch_recent_posts()
+                ig_posts = await InstagramService(instagram_token).fetch_recent_posts()
                 await self._upsert_posts(ig_posts)
                 stats["instagram_synced"] = len(ig_posts)
-            except Exception as e:
-                print(f"Instagram sync error: {e}")
+            except Exception:
+                logger.exception("Instagram sync failed for creator %s", self.creator_id)
+                stats["errors"].append("Instagram sync failed")
 
         return stats
 
@@ -67,7 +72,6 @@ class AggregatorService:
                 pub_at = p_data.get("published_at")
                 if isinstance(pub_at, str):
                     try:
-                        from datetime import datetime
                         pub_at = datetime.fromisoformat(pub_at.replace("Z", "+00:00"))
                     except ValueError:
                         pub_at = None

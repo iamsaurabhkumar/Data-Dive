@@ -1,16 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
   output: "standalone",
-  async rewrites() {
-    return [
-      {
-        source: "/api/:path*",
-        destination: `${process.env.INTERNAL_API_URL || "http://api:8000"}/api/:path*`,
-      },
-    ];
-  },
+  // API calls are proxied at runtime by src/app/api/[...path]/route.ts
+  // (build-time rewrites cannot see INTERNAL_API_URL injected by docker-compose).
 };
 
 export default nextConfig;

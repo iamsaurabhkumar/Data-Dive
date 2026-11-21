@@ -18,7 +18,7 @@ from arq.connections import RedisSettings
 from config import get_worker_settings
 
 # Import business logic tasks
-from tasks import fetch_and_analyze_trends
+from tasks import enrich_idea, fetch_and_analyze_trends, fetch_trends_for_all_creators
 
 logging.basicConfig(
     level=logging.INFO,
@@ -100,11 +100,14 @@ class WorkerSettings:
     functions = [
         # Per-task configuration
         func(fetch_and_analyze_trends, max_tries=4, timeout=120),
+        func(enrich_idea, max_tries=3, timeout=60),  # ENRICH_MAX_TRIES in tasks.py
         process_sync_task,
     ]
 
     cron_jobs = [
         cron(heartbeat, second=0),
+        # V2 spec: automated 12-hour polling cycle (00:00 and 12:00 UTC)
+        cron(fetch_trends_for_all_creators, hour={0, 12}, minute=5, run_at_startup=False),
     ]
 
     on_startup = startup
