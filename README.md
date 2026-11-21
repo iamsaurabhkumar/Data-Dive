@@ -2,6 +2,10 @@
 
 A data-first analytics engine for content creators. Aggregate YouTube & Instagram metrics into one unified dashboard.
 
+## License
+
+This repository is licensed under the [MIT License](LICENSE).
+
 ## 🏗️ Architecture
 
 ```
